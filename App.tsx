@@ -37,6 +37,8 @@ import {
   Calculator,
   Plus,
   Trash2,
+  Share2,
+  AlertCircle,
   CreditCard as CardIcon
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
@@ -70,9 +72,9 @@ interface OTEntry {
 const OT_MULTIPLIERS = {
   regular: 1.25,
   rest_special: 1.30,
-  rest_special_excess: 1.69, // 1.3 * 1.3
+  rest_special_excess: 1.69,
   regular_holiday: 2.0,
-  regular_holiday_excess: 2.6, // 2.0 * 1.3
+  regular_holiday_excess: 2.6,
 };
 
 const OT_LABELS = {
@@ -90,6 +92,11 @@ const App: React.FC = () => {
   const [showRefHub, setShowRefHub] = useState(false);
   const [showOTCalculator, setShowOTCalculator] = useState(false);
   const [activeTab, setActiveTab] = useState<'details' | 'earnings' | 'deductions'>('details');
+
+  // Webhook State
+  const [webhookUrl, setWebhookUrl] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
   // OT Calculator State
   const [otEntries, setOtEntries] = useState<OTEntry[]>([
@@ -240,6 +247,41 @@ const App: React.FC = () => {
   const handleApplyOT = () => {
     handleEarningsChange('overtime', Number(calculatedOTTotal.toFixed(2)));
     setShowOTCalculator(false);
+  };
+
+  const handleTriggerWebhook = async () => {
+    if (!webhookUrl) return;
+    setIsSyncing(true);
+    setSyncStatus('idle');
+
+    const payload = {
+      timestamp: new Date().toISOString(),
+      metadata: {
+        company: "Fillenial Digital Marketing Services",
+        version: "25.1"
+      },
+      payrollData: state,
+      calculations: totals
+    };
+
+    try {
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      if (response.ok) {
+        setSyncStatus('success');
+      } else {
+        setSyncStatus('error');
+      }
+    } catch (error) {
+      setSyncStatus('error');
+    } finally {
+      setIsSyncing(false);
+      setTimeout(() => setSyncStatus('idle'), 3000);
+    }
   };
 
   const addOTEntry = () => {
@@ -421,31 +463,75 @@ const App: React.FC = () => {
 
               <div className="p-10 min-h-[500px]">
                 {activeTab === 'details' && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-10 animate-in fade-in duration-500">
-                    <InputGroup label="Employee Name" value={state.employee.name} onChange={(v) => handleEmployeeChange('name', v)} icon={<User size={14}/>} />
-                    <InputGroup label="Employee ID" value={state.employee.employeeId} onChange={(v) => handleEmployeeChange('employeeId', v)} icon={<Fingerprint size={14}/>} />
-                    <InputGroup label="Designation" value={state.employee.designation} onChange={(v) => handleEmployeeChange('designation', v)} icon={<Briefcase size={14}/>} />
-                    <InputGroup label="Department" value={state.employee.department} onChange={(v) => handleEmployeeChange('department', v)} icon={<Building2 size={14}/>} />
-                    <InputGroup label="Date of Joining" value={state.employee.dateOfJoining} onChange={(v) => handleEmployeeChange('dateOfJoining', v)} type="date" icon={<CalendarCheck size={14}/>} />
-                    <InputGroup label="Monthly Basic Rate" value={state.employee.basicMonthlyPay} onChange={(v) => handleEmployeeChange('basicMonthlyPay', parseFloat(v) || 0)} type="number" prefix="₱" icon={<BadgeDollarSign size={14}/>} />
-                    <InputGroup label="Pay Date" value={state.employee.payDate} onChange={(v) => handleEmployeeChange('payDate', v)} type="date" icon={<Wallet size={14}/>} />
-                    <SelectGroup 
-                      label="Disbursement" 
-                      value={state.employee.disbursementMethod} 
-                      onChange={(v) => handleEmployeeChange('disbursementMethod', v)} 
-                      options={['Bank Transfer', 'Card Payment', 'Cash']}
-                      icon={<CreditCard size={14}/>}
-                    />
-                    {state.employee.disbursementMethod !== 'Cash' && (
-                      <div className="md:col-span-2 grid grid-cols-2 gap-8 pt-6 border-t border-slate-50">
-                        <InputGroup label="Bank Name" value={state.employee.bankName} onChange={(v) => handleEmployeeChange('bankName', v)} icon={<Landmark size={14}/>} />
-                        <InputGroup label="Account Number" value={state.employee.accountNumber} onChange={(v) => handleEmployeeChange('accountNumber', v)} icon={<Hash size={14}/>} />
+                  <div className="space-y-12 animate-in fade-in duration-500">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-10">
+                      <InputGroup label="Employee Name" value={state.employee.name} onChange={(v) => handleEmployeeChange('name', v)} icon={<User size={14}/>} />
+                      <InputGroup label="Employee ID" value={state.employee.employeeId} onChange={(v) => handleEmployeeChange('employeeId', v)} icon={<Fingerprint size={14}/>} />
+                      <InputGroup label="Designation" value={state.employee.designation} onChange={(v) => handleEmployeeChange('designation', v)} icon={<Briefcase size={14}/>} />
+                      <InputGroup label="Department" value={state.employee.department} onChange={(v) => handleEmployeeChange('department', v)} icon={<Building2 size={14}/>} />
+                      <InputGroup label="Date of Joining" value={state.employee.dateOfJoining} onChange={(v) => handleEmployeeChange('dateOfJoining', v)} type="date" icon={<CalendarCheck size={14}/>} />
+                      <InputGroup label="Monthly Basic Rate" value={state.employee.basicMonthlyPay} onChange={(v) => handleEmployeeChange('basicMonthlyPay', parseFloat(v) || 0)} type="number" prefix="₱" icon={<BadgeDollarSign size={14}/>} />
+                      <InputGroup label="Pay Date" value={state.employee.payDate} onChange={(v) => handleEmployeeChange('payDate', v)} type="date" icon={<Wallet size={14}/>} />
+                      <SelectGroup 
+                        label="Disbursement" 
+                        value={state.employee.disbursementMethod} 
+                        onChange={(v) => handleEmployeeChange('disbursementMethod', v)} 
+                        options={['Bank Transfer', 'Card Payment', 'Cash']}
+                        icon={<CreditCard size={14}/>}
+                      />
+                      {state.employee.disbursementMethod !== 'Cash' && (
+                        <div className="md:col-span-2 grid grid-cols-2 gap-8 pt-6 border-t border-slate-50">
+                          <InputGroup label="Bank Name" value={state.employee.bankName} onChange={(v) => handleEmployeeChange('bankName', v)} icon={<Landmark size={14}/>} />
+                          <InputGroup label="Account Number" value={state.employee.accountNumber} onChange={(v) => handleEmployeeChange('accountNumber', v)} icon={<Hash size={14}/>} />
+                        </div>
+                      )}
+                      <div className="md:col-span-2 grid grid-cols-3 gap-8 pt-6 border-t border-slate-50 mt-4">
+                        <InputGroup label="Period Start" value={state.employee.payPeriodStart} onChange={(v) => handleEmployeeChange('payPeriodStart', v)} type="date" />
+                        <InputGroup label="Period End" value={state.employee.payPeriodEnd} onChange={(v) => handleEmployeeChange('payPeriodEnd', v)} type="date" />
+                        <InputGroup label="Absences (Days)" value={state.employee.absences} onChange={(v) => handleEmployeeChange('absences', parseInt(v) || 0)} type="number" icon={<UserX size={14}/>} />
                       </div>
-                    )}
-                    <div className="md:col-span-2 grid grid-cols-3 gap-8 pt-6 border-t border-slate-50 mt-4">
-                      <InputGroup label="Period Start" value={state.employee.payPeriodStart} onChange={(v) => handleEmployeeChange('payPeriodStart', v)} type="date" />
-                      <InputGroup label="Period End" value={state.employee.payPeriodEnd} onChange={(v) => handleEmployeeChange('payPeriodEnd', v)} type="date" />
-                      <InputGroup label="Absences (Days)" value={state.employee.absences} onChange={(v) => handleEmployeeChange('absences', parseInt(v) || 0)} type="number" icon={<UserX size={14}/>} />
+                    </div>
+
+                    {/* --- WEBHOOK INTEGRATION SECTION --- */}
+                    <div className="p-10 border-2 border-black rounded-3xl bg-slate-50 space-y-8">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-xs font-black text-black uppercase tracking-widest flex items-center gap-3">
+                          <Share2 size={16} className="text-[#E31E24]" /> Integration Hub
+                        </h3>
+                        {syncStatus !== 'idle' && (
+                          <div className={`flex items-center gap-2 text-[10px] font-black uppercase px-4 py-1.5 rounded-full border ${
+                            syncStatus === 'success' ? 'bg-green-50 text-green-600 border-green-200' : 'bg-red-50 text-red-600 border-red-200'
+                          }`}>
+                            {syncStatus === 'success' ? <CheckCircle2 size={12}/> : <AlertCircle size={12}/>}
+                            {syncStatus === 'success' ? 'Sync Complete' : 'Sync Failed'}
+                          </div>
+                        )}
+                      </div>
+                      <div className="space-y-6">
+                        <div className="space-y-3">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Gather All Data via Webhook (POST)</label>
+                          <div className="flex gap-4">
+                            <input 
+                              type="url" 
+                              value={webhookUrl} 
+                              onChange={(e) => setWebhookUrl(e.target.value)}
+                              placeholder="https://your-api.com/webhook"
+                              className="flex-1 px-5 py-4 bg-white border-2 border-slate-100 rounded-xl font-bold text-black focus:border-black outline-none transition-all text-sm"
+                            />
+                            <button 
+                              onClick={handleTriggerWebhook}
+                              disabled={isSyncing || !webhookUrl}
+                              className="px-8 py-4 bg-black text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-[#E31E24] transition-all flex items-center gap-3 shadow-lg disabled:opacity-30 disabled:hover:bg-black"
+                            >
+                              {isSyncing ? <Loader2 size={16} className="animate-spin" /> : <Share2 size={16} />}
+                              {isSyncing ? 'Syncing...' : 'Trigger Data Sync'}
+                            </button>
+                          </div>
+                        </div>
+                        <p className="text-[10px] font-medium text-slate-400 italic">
+                          *Gather all payroll records, calculations, and employee data in a single JSON POST request.
+                        </p>
+                      </div>
                     </div>
                   </div>
                 )}
